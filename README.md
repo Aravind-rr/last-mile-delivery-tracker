@@ -1,5 +1,13 @@
 # ShipTrack — Last-Mile Delivery Tracker
 
+### ▶ [Live demo — shiptrack-production-4eed.up.railway.app](https://shiptrack-production-4eed.up.railway.app)
+
+Sign in with **`admin@lmdt.dev`** / **`Password@123`**, or use the one-click
+Admin / Customer / Agent buttons on the login page.
+API docs are live too: [**/docs**](https://shiptrack-production-4eed.up.railway.app/docs).
+
+---
+
 A complete last-mile logistics application: customers book and track shipments,
 delivery agents execute them in the field, and admins configure zones, rate cards
 and COD charges while dispatching the fleet.
@@ -94,6 +102,34 @@ last-mile-delivery-tracker/
 │   └── context/AuthContext.tsx
 └── docs/
 ```
+
+---
+
+## Live demo
+
+| | |
+| --- | --- |
+| Application | **https://shiptrack-production-4eed.up.railway.app** |
+| API docs (Swagger UI) | https://shiptrack-production-4eed.up.railway.app/docs |
+| Health check | https://shiptrack-production-4eed.up.railway.app/health |
+| Hosting | Railway — Node service + managed PostgreSQL, deployed from `main` |
+
+The API and the dashboard are served from a single origin: Express serves
+`web/dist` with an SPA fallback, so the browser calls a relative `/api` and no
+CORS or API-URL configuration is needed.
+
+Try this in the live app:
+
+1. Sign in as **Customer** → *Create Order* → set the postal codes to `560034`
+   and `560048` → **Calculate price** → the breakdown shows volumetric weight
+   6 kg beating the 4 kg actual weight → **Confirm**.
+2. Sign in as **Admin** → *Orders* → **Auto-assign** → the banner names the
+   agent, the method and the distance.
+3. Sign in as that **Agent** → advance the status, or fail the delivery with a
+   reason → back as the customer, reschedule it.
+
+> The demo database is reseeded on every deploy, so anything you create there is
+> temporary. Do not enter real personal data.
 
 ---
 
@@ -255,6 +291,24 @@ first if the data has drifted.
 
 ## Deployment
 
+The live demo runs on Railway as **one Node service plus a managed PostgreSQL
+database**, built straight from this repository:
+
+| Setting | Value |
+| --- | --- |
+| Build | `npm run build` (installs both workspaces, compiles the API, builds the SPA) |
+| Pre-deploy | `npm run db:deploy` (`prisma db push` then seed) |
+| Start | `npm start` → `node server/dist/src/index.js` |
+| Health check | `/health` |
+| Variables | `DATABASE_URL` (reference to the Postgres service), `JWT_SECRET`, `JWT_EXPIRES_IN`, `NODE_ENV`, `NOTIFICATION_DRIVER` |
+
+[`railway.json`](railway.json) holds the build and health-check configuration.
+To reproduce it: create a Railway project, deploy the PostgreSQL template, add a
+service pointed at this repo, set `DATABASE_URL` to `${{Postgres.DATABASE_URL}}`
+plus a strong `JWT_SECRET`, and generate a domain.
+
+### Deploying the pieces separately
+
 **Backend** (Railway / Render / Fly.io / any Node host)
 
 ```bash
@@ -287,6 +341,7 @@ a live adapter, and `npm run seed` **not** run against production.
 ## Known limitations
 
 - Notifications are logged, not actually sent — the console adapter is the demo default.
+- The live demo reseeds its database on every deploy, and the free-tier service may cold-start on the first request.
 - Schema is applied with `prisma db push`; there is no migration history yet.
 - Zone resolution uses postal-code mappings rather than a geocoding service.
 - Tracking updates are fetched on load; there is no websocket push.
