@@ -1,7 +1,11 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Load .env from the server directory whether we run from source (cwd=server)
+// or from the compiled bundle (cwd=repo root). On a hosted platform the
+// variables are injected directly and these lookups simply find nothing.
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
 
 export const env = {
   port: Number(process.env.PORT || 4000),

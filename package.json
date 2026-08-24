@@ -1,0 +1,14 @@
+{
+  "name": "last-mile-delivery-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Last-mile delivery tracker — API and dashboard served from one Node process in production.",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix web install",
+    "build": "npm --prefix server ci && npm --prefix web ci && npm --prefix server run build && npm --prefix web run build",
+    "db:deploy": "npm --prefix server run prisma:push && npm --prefix server run seed:prod",
+    "start": "node server/dist/src/index.js",
+    "test": "npm --prefix server test"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,3 +1,5 @@
+import path from 'path';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -31,6 +33,15 @@ export function createApp() {
 
   app.get('/openapi.json', (_req, res) => res.json(openapiDocument));
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiDocument));
+
+  // In production the compiled dashboard is served from the same origin as the
+  // API, so the browser talks to a relative /api and no CORS setup is needed.
+  const webDist = path.resolve(__dirname, '../../../web/dist');
+  if (fs.existsSync(webDist)) {
+    app.use(express.static(webDist));
+    app.get(/^(?!\/api|\/docs|\/health|\/openapi\.json).*/, (_req, res) =>
+      res.sendFile(path.join(webDist, 'index.html')));
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
