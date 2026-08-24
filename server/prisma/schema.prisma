@@ -1,0 +1,366 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Role {
+  ADMIN
+  CUSTOMER
+  AGENT
+}
+
+enum AgentStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
+enum ServiceType {
+  B2B
+  B2C
+}
+
+enum PaymentType {
+  PREPAID
+  COD
+}
+
+enum ZoneScope {
+  INTRA_ZONE
+  INTER_ZONE
+}
+
+enum OrderStatus {
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum AddressKind {
+  PICKUP
+  DROP
+}
+
+enum AttemptStatus {
+  SCHEDULED
+  IN_PROGRESS
+  DELIVERED
+  FAILED
+}
+
+enum AssignmentMethod {
+  MANUAL
+  AUTO_NEAREST_COORDINATES
+  AUTO_PICKUP_ZONE
+}
+
+enum CodMode {
+  FLAT
+  PERCENT_OF_VALUE
+  HIGHER_OF_BOTH
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+// ---------------------------------------------------------------- identity
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role     @default(CUSTOMER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  agentProfile     AgentProfile?
+  orders           Order[]              @relation("CustomerOrders")
+  createdOrders    Order[]              @relation("OrderCreatedBy")
+  statusHistory    OrderStatusHistory[] @relation("HistoryActor")
+  assignmentsMade  AgentAssignment[]    @relation("AssignedBy")
+  notifications    Notification[]
+}
+
+model AgentProfile {
+  id             String      @id @default(cuid())
+  userId         String      @unique
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         AgentStatus @default(OFFLINE)
+  vehicleType    String      @default("BIKE")
+  maxActiveOrders Int        @default(5)
+  latitude       Float?
+  longitude      Float?
+  locationUpdatedAt DateTime?
+  baseZoneId     String?
+  baseZone       Zone?       @relation(fields: [baseZoneId], references: [id])
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  assignments     AgentAssignment[]
+  attempts        DeliveryAttempt[]
+  currentOrders   Order[]           @relation("CurrentAgent")
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------- geography
+
+model Zone {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  city      String
+  centerLat Float?
+  centerLng Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  areas         ZoneArea[]
+  agents        AgentProfile[]
+  addresses     OrderAddress[]
+  pickupOrders  Order[]        @relation("PickupZone")
+  dropOrders    Order[]        @relation("DropZone")
+}
+
+model ZoneArea {
+  id         String   @id @default(cuid())
+  zoneId     String
+  zone       Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  postalCode String   @unique
+  areaName   String
+  createdAt  DateTime @default(now())
+
+  @@index([zoneId])
+}
+
+// ---------------------------------------------------------------- pricing config
+
+model RateCard {
+  id                   String      @id @default(cuid())
+  name                 String
+  serviceType          ServiceType
+  currency             String      @default("INR")
+  volumetricDivisor    Int         @default(5000)
+  fuelSurchargePercent Float       @default(0)
+  taxPercent           Float       @default(0)
+  isActive             Boolean     @default(true)
+  effectiveFrom        DateTime    @default(now())
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  rules  RateRule[]
+  orders Order[]
+
+  @@index([serviceType, isActive])
+}
+
+model RateRule {
+  id              String    @id @default(cuid())
+  rateCardId      String
+  rateCard        RateCard  @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+  scope           ZoneScope
+  baseCharge      Float
+  includedWeightKg Float    @default(1)
+  perKgCharge     Float
+  minCharge       Float     @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([rateCardId, scope])
+}
+
+model CodSurcharge {
+  id             String      @id @default(cuid())
+  serviceType    ServiceType
+  mode           CodMode     @default(HIGHER_OF_BOTH)
+  flatAmount     Float       @default(0)
+  percentOfValue Float       @default(0)
+  minAmount      Float       @default(0)
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([serviceType, isActive])
+}
+
+// ---------------------------------------------------------------- orders
+
+model Order {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  customerId   String
+  customer     User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  createdById  String
+  createdBy    User        @relation("OrderCreatedBy", fields: [createdById], references: [id])
+
+  serviceType  ServiceType
+  paymentType  PaymentType
+  status       OrderStatus @default(PENDING_ASSIGNMENT)
+
+  lengthCm     Float
+  breadthCm    Float
+  heightCm     Float
+  actualWeightKg     Float
+  volumetricWeightKg Float
+  billableWeightKg   Float
+  declaredValue      Float @default(0)
+
+  pickupZoneId String
+  pickupZone   Zone      @relation("PickupZone", fields: [pickupZoneId], references: [id])
+  dropZoneId   String
+  dropZone     Zone      @relation("DropZone", fields: [dropZoneId], references: [id])
+  zoneScope    ZoneScope
+
+  rateCardId   String
+  rateCard     RateCard  @relation(fields: [rateCardId], references: [id])
+
+  baseCharge      Float
+  weightCharge    Float
+  fuelSurcharge   Float
+  codCharge       Float
+  taxAmount       Float
+  totalPrice      Float
+  priceBreakdown  Json
+
+  currentAgentId String?
+  currentAgent   AgentProfile? @relation("CurrentAgent", fields: [currentAgentId], references: [id])
+
+  scheduledDate  DateTime?
+  deliveredAt    DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  addresses     OrderAddress[]
+  attempts      DeliveryAttempt[]
+  assignments   AgentAssignment[]
+  statusHistory OrderStatusHistory[]
+  notifications Notification[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([currentAgentId])
+}
+
+model OrderAddress {
+  id          String      @id @default(cuid())
+  orderId     String
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind        AddressKind
+  contactName String
+  contactPhone String
+  line1       String
+  line2       String?
+  city        String
+  state       String
+  postalCode  String
+  latitude    Float?
+  longitude   Float?
+  zoneId      String
+  zone        Zone        @relation(fields: [zoneId], references: [id])
+
+  @@unique([orderId, kind])
+}
+
+model DeliveryAttempt {
+  id            String        @id @default(cuid())
+  orderId       String
+  order         Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  attemptNumber Int
+  agentId       String?
+  agent         AgentProfile? @relation(fields: [agentId], references: [id])
+  status        AttemptStatus @default(SCHEDULED)
+  scheduledFor  DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  failureReason String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+
+  statusHistory OrderStatusHistory[]
+
+  @@unique([orderId, attemptNumber])
+}
+
+model AgentAssignment {
+  id           String           @id @default(cuid())
+  orderId      String
+  order        Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  agentId      String
+  agent        AgentProfile     @relation(fields: [agentId], references: [id])
+  attemptId    String?
+  method       AssignmentMethod
+  assignedById String?
+  assignedBy   User?            @relation("AssignedBy", fields: [assignedById], references: [id])
+  distanceKm   Float?
+  reason       String?
+  isActive     Boolean          @default(true)
+  assignedAt   DateTime         @default(now())
+  releasedAt   DateTime?
+
+  @@index([orderId])
+  @@index([agentId])
+}
+
+/// Append-only audit trail. The API never updates or deletes these rows.
+model OrderStatusHistory {
+  id             String       @id @default(cuid())
+  orderId        String
+  order          Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  attemptId      String?
+  attempt        DeliveryAttempt? @relation(fields: [attemptId], references: [id])
+  previousStatus OrderStatus?
+  newStatus      OrderStatus
+  actorId        String?
+  actor          User?        @relation("HistoryActor", fields: [actorId], references: [id])
+  actorRole      Role?
+  actorLabel     String       @default("SYSTEM")
+  note           String?
+  createdAt      DateTime     @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  orderId    String?
+  order      Order?              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?               @relation(fields: [userId], references: [id])
+  channel    NotificationChannel
+  event      String
+  recipient  String
+  subject    String
+  body       String
+  status     NotificationStatus  @default(QUEUED)
+  error      String?
+  createdAt  DateTime            @default(now())
+  sentAt     DateTime?
+
+  @@index([orderId])
+  @@index([userId])
+}
